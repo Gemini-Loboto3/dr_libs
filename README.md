@@ -12,6 +12,8 @@ Library                                         | Description
 [dr_flac](dr_flac.h)                            | FLAC audio decoder.
 [dr_mp3](dr_mp3.h)                              | MP3 audio decoder. Based off [minimp3](https://github.com/lieff/minimp3).
 [dr_wav](dr_wav.h)                              | WAV audio loader and writer.
+[dr_wma](dr_wma.h)                              | Windows Media Audio v1&2 decoder.
+[dr_vorbis](dr_vorbis.h)                        | Vorbis audio decoder.
 
 
 # Other Libraries
