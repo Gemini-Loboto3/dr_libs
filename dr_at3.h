@@ -1,5 +1,5 @@
 /*
- * dr_at3.h - ATRAC3/ATRAC3+ Decoder & Container Parser - Single Header Library
+ * dr_at3.h - ATRAC3/ATRAC3+ Decoder - Single Header Library
  * 
  * Ported from FFmpeg via PPSSPP's standalone extraction.
  *
@@ -7,11 +7,49 @@
  * Copyright (c) 2002 The FFmpeg Project (ATRAC3)
  * Copyright (c) 2024 PPSSPP Project (standalone extraction)
  *
- * Decoder: LGPL v2.1 | Container parser: Public domain
+ * Decoder: LGPL v2.1 | Container parser & wrapper: Public domain
  *
- * Usage:
- *   #define DR_AT3_IMPLEMENTATION
- *   #include "dr_at3.h"
+ * USAGE
+ *
+ * This is a single-file library. To use it, do something like the following in one .c file:
+ *
+ *     #define DR_AT3_IMPLEMENTATION
+ *     #include "dr_at3.h"
+ *
+ * You can then #include this file in other parts of the program as you would with any other header.
+ *
+ * QUICK START - Simple API (decode entire file):
+ *
+ *     drat3_uint32 channels, sampleRate;
+ *     drat3_uint64 totalFrames;
+ *     float* samples = drat3_open_file_and_read_pcm_frames_f32("file.at3", &channels, &sampleRate, &totalFrames, NULL);
+ *     if (samples) {
+ *         // Use samples...
+ *         drat3_free(samples, NULL);
+ *     }
+ *
+ * QUICK START - Streaming API (decode frame by frame):
+ *
+ *     drat3 at3;
+ *     if (drat3_init_file("file.at3", NULL, &at3) == DRAT3_SUCCESS) {
+ *         float buffer[4096];
+ *         drat3_uint64 framesRead;
+ *         while ((framesRead = drat3_read_pcm_frames_f32(&at3, 1024, buffer)) > 0) {
+ *             // Process samples...
+ *         }
+ *         drat3_uninit(&at3);
+ *     }
+ *
+ * SUPPORTED FORMATS
+ *
+ *   - ATRAC3 in RIFF WAV container (.at3, .wav)
+ *   - ATRAC3+ in RIFF WAV container (.at3, .wav)
+ *   - ATRAC3/3+ in OMA container (.oma, .aa3)
+ *
+ * OPTIONS
+ *
+ *   #define DR_AT3_NO_STDIO
+ *     Disables file I/O APIs (drat3_init_file, drat3_open_file_and_read_pcm_frames_*).
  */
 
 #ifndef DR_AT3_H
@@ -69,6 +107,170 @@ struct ATRAC3PContext *atrac3p_alloc(int channels, int *block_align);
 void atrac3p_free(struct ATRAC3PContext *ctx);
 void atrac3p_flush_buffers(struct ATRAC3PContext *ctx);
 int atrac3p_decode_frame(struct ATRAC3PContext *ctx, float *out_data[2], int *nb_samples, const uint8_t *buf, int buf_size);
+
+/*******************************************************************************
+ * dr_libs Style High-Level API
+ ******************************************************************************/
+
+#define DRAT3_VERSION_MAJOR     0
+#define DRAT3_VERSION_MINOR     1
+#define DRAT3_VERSION_REVISION  0
+#define DRAT3_VERSION_STRING    "0.1.0"
+
+/* Sized types */
+typedef signed char        drat3_int8;
+typedef unsigned char      drat3_uint8;
+typedef signed short       drat3_int16;
+typedef unsigned short     drat3_uint16;
+typedef signed int         drat3_int32;
+typedef unsigned int       drat3_uint32;
+#if defined(_MSC_VER) && !defined(__clang__)
+    typedef signed   __int64 drat3_int64;
+    typedef unsigned __int64 drat3_uint64;
+#else
+    #if defined(__clang__) || (defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)))
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wlong-long"
+        #if defined(__clang__)
+            #pragma GCC diagnostic ignored "-Wc++11-long-long"
+        #endif
+    #endif
+    typedef signed   long long drat3_int64;
+    typedef unsigned long long drat3_uint64;
+    #if defined(__clang__) || (defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)))
+        #pragma GCC diagnostic pop
+    #endif
+#endif
+typedef drat3_uint8 drat3_bool8;
+typedef drat3_uint32 drat3_bool32;
+#define DRAT3_TRUE  1
+#define DRAT3_FALSE 0
+
+#if !defined(DRAT3_API)
+    #if defined(DR_AT3_DLL)
+        #if defined(_WIN32)
+            #define DRAT3_DLL_IMPORT  __declspec(dllimport)
+            #define DRAT3_DLL_EXPORT  __declspec(dllexport)
+            #define DRAT3_DLL_PRIVATE static
+        #else
+            #if defined(__GNUC__) && __GNUC__ >= 4
+                #define DRAT3_DLL_IMPORT  __attribute__((visibility("default")))
+                #define DRAT3_DLL_EXPORT  __attribute__((visibility("default")))
+                #define DRAT3_DLL_PRIVATE __attribute__((visibility("hidden")))
+            #else
+                #define DRAT3_DLL_IMPORT
+                #define DRAT3_DLL_EXPORT
+                #define DRAT3_DLL_PRIVATE static
+            #endif
+        #endif
+        #if defined(DR_AT3_IMPLEMENTATION)
+            #define DRAT3_API  DRAT3_DLL_EXPORT
+        #else
+            #define DRAT3_API  DRAT3_DLL_IMPORT
+        #endif
+    #else
+        #define DRAT3_API extern
+    #endif
+#endif
+
+/* Result codes */
+typedef drat3_int32 drat3_result;
+#define DRAT3_SUCCESS               0
+#define DRAT3_ERROR                -1
+#define DRAT3_INVALID_ARGS         -2
+#define DRAT3_INVALID_OPERATION    -3
+#define DRAT3_OUT_OF_MEMORY        -4
+#define DRAT3_OUT_OF_RANGE         -5
+#define DRAT3_INVALID_FILE         -10
+#define DRAT3_AT_END               -17
+#define DRAT3_BAD_SEEK             -25
+#define DRAT3_NOT_IMPLEMENTED      -29
+
+/* Seek origins */
+typedef enum {
+    drat3_seek_origin_start,
+    drat3_seek_origin_current
+} drat3_seek_origin;
+
+/* Allocation callbacks */
+typedef struct {
+    void* pUserData;
+    void* (* onMalloc)(size_t sz, void* pUserData);
+    void* (* onRealloc)(void* p, size_t sz, void* pUserData);
+    void  (* onFree)(void* p, void* pUserData);
+} drat3_allocation_callbacks;
+
+/* Config */
+typedef struct {
+    drat3_allocation_callbacks allocationCallbacks;
+} drat3_config;
+
+/* Main decoder structure */
+typedef struct drat3 {
+    drat3_uint32 channels;
+    drat3_uint32 sampleRate;
+    drat3_uint64 totalPCMFrameCount;
+    drat3_uint64 currentPCMFrame;
+    drat3_codec_type codecType;
+    
+    /* Internal state */
+    drat3_container* pContainer;
+    void* pDecoder;                     /* ATRAC3Context or ATRAC3PContext */
+    drat3_uint8* pFrameBuffer;          /* Buffer for encoded frame data */
+    drat3_uint32 frameBufferSize;
+    float* pDecodeBuffer;               /* Interleaved decode buffer */
+    drat3_uint32 decodeBufferCapacity;  /* In PCM frames */
+    drat3_uint32 leftoverFrames;        /* Leftover frames from previous decode */
+    drat3_uint32 leftoverOffset;        /* Offset into decode buffer */
+    drat3_allocation_callbacks allocationCallbacks;
+} drat3;
+
+/*
+ * Low-Level API
+ */
+
+#ifndef DR_AT3_NO_STDIO
+/* Initialize from file path. */
+DRAT3_API drat3_result drat3_init_file(const char* pFilePath, const drat3_config* pConfig, drat3* pAt3);
+#endif
+
+/* Initialize from memory block. Data must remain valid for decoder lifetime. */
+DRAT3_API drat3_result drat3_init_memory(const void* pData, size_t dataSize, const drat3_config* pConfig, drat3* pAt3);
+
+/* Uninitialize decoder. */
+DRAT3_API void drat3_uninit(drat3* pAt3);
+
+/* Read PCM frames as 32-bit float interleaved. Returns frames actually read. */
+DRAT3_API drat3_uint64 drat3_read_pcm_frames_f32(drat3* pAt3, drat3_uint64 framesToRead, float* pBufferOut);
+
+/* Read PCM frames as signed 16-bit interleaved. Returns frames actually read. */
+DRAT3_API drat3_uint64 drat3_read_pcm_frames_s16(drat3* pAt3, drat3_uint64 framesToRead, drat3_int16* pBufferOut);
+
+/* Seek to specific PCM frame. Returns DRAT3_SUCCESS on success. */
+DRAT3_API drat3_result drat3_seek_to_pcm_frame(drat3* pAt3, drat3_uint64 targetPCMFrameIndex);
+
+/* Get current position in PCM frames. */
+DRAT3_API drat3_uint64 drat3_get_cursor_in_pcm_frames(drat3* pAt3);
+
+/* Get total length in PCM frames. */
+DRAT3_API drat3_uint64 drat3_get_length_in_pcm_frames(drat3* pAt3);
+
+/*
+ * High-Level API
+ */
+
+#ifndef DR_AT3_NO_STDIO
+/* Open file and read entire contents. Free with drat3_free(). */
+DRAT3_API float* drat3_open_file_and_read_pcm_frames_f32(const char* pFilePath, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks);
+DRAT3_API drat3_int16* drat3_open_file_and_read_pcm_frames_s16(const char* pFilePath, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks);
+#endif
+
+/* Open memory and read entire contents. Free with drat3_free(). */
+DRAT3_API float* drat3_open_memory_and_read_pcm_frames_f32(const void* pData, size_t dataSize, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks);
+DRAT3_API drat3_int16* drat3_open_memory_and_read_pcm_frames_s16(const void* pData, size_t dataSize, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks);
+
+/* Free memory allocated by drat3. */
+DRAT3_API void drat3_free(void* p, const drat3_allocation_callbacks* pAllocationCallbacks);
 
 #ifdef __cplusplus
 }
@@ -7677,6 +7879,532 @@ int atrac3p_decode_frame(ATRAC3PContext *ctx, float *out_data[2], int *nb_sample
 
 void atrac3p_flush_buffers(ATRAC3PContext *ctx) {
 	// TODO: Not sure what should be zeroed here.
+}
+
+/*******************************************************************************
+ * dr_libs Style High-Level API Implementation
+ ******************************************************************************/
+
+/* Allocation helpers */
+static void* drat3__malloc(size_t sz, const drat3_allocation_callbacks* pAlloc) {
+    if (pAlloc && pAlloc->onMalloc) {
+        return pAlloc->onMalloc(sz, pAlloc->pUserData);
+    }
+    return malloc(sz);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
+static void* drat3__realloc(void* p, size_t sz, const drat3_allocation_callbacks* pAlloc) {
+    if (pAlloc && pAlloc->onRealloc) {
+        return pAlloc->onRealloc(p, sz, pAlloc->pUserData);
+    }
+    return realloc(p, sz);
+}
+
+static void drat3__free(void* p, const drat3_allocation_callbacks* pAlloc) {
+    if (p == NULL) {
+        return;
+    }
+    if (pAlloc && pAlloc->onFree) {
+        pAlloc->onFree(p, pAlloc->pUserData);
+        return;
+    }
+    free(p);
+}
+
+/* Float to int16 conversion */
+static drat3_int16 drat3__f32_to_s16(float x) {
+    x = x * 32767.0f;
+    if (x < -32768.0f) x = -32768.0f;
+    if (x >  32767.0f) x =  32767.0f;
+    return (drat3_int16)x;
+}
+
+/* Internal init helper */
+static drat3_result drat3__init_internal(drat3* pAt3, drat3_container* pContainer, const drat3_config* pConfig) {
+    const drat3_container_info* pInfo;
+    int block_align;
+    
+    if (pAt3 == NULL || pContainer == NULL) {
+        return DRAT3_INVALID_ARGS;
+    }
+    
+    memset(pAt3, 0, sizeof(*pAt3));
+    
+    if (pConfig) {
+        pAt3->allocationCallbacks = pConfig->allocationCallbacks;
+    }
+    
+    pInfo = drat3_container_get_info(pContainer);
+    if (pInfo == NULL) {
+        drat3_container_close(pContainer);
+        return DRAT3_INVALID_FILE;
+    }
+    
+    pAt3->pContainer = pContainer;
+    pAt3->channels = pInfo->channels;
+    pAt3->sampleRate = pInfo->sample_rate;
+    pAt3->totalPCMFrameCount = pInfo->total_samples;
+    pAt3->codecType = pInfo->codec_type;
+    pAt3->currentPCMFrame = 0;
+    
+    /* Allocate frame buffer */
+    pAt3->frameBufferSize = pInfo->block_align + 16;
+    pAt3->pFrameBuffer = (drat3_uint8*)drat3__malloc(pAt3->frameBufferSize, &pAt3->allocationCallbacks);
+    if (pAt3->pFrameBuffer == NULL) {
+        drat3_container_close(pContainer);
+        return DRAT3_OUT_OF_MEMORY;
+    }
+    
+    /* Allocate decode buffer (enough for one frame, interleaved) */
+    pAt3->decodeBufferCapacity = pInfo->samples_per_frame;
+    pAt3->pDecodeBuffer = (float*)drat3__malloc(pAt3->decodeBufferCapacity * pAt3->channels * sizeof(float), &pAt3->allocationCallbacks);
+    if (pAt3->pDecodeBuffer == NULL) {
+        drat3__free(pAt3->pFrameBuffer, &pAt3->allocationCallbacks);
+        drat3_container_close(pContainer);
+        return DRAT3_OUT_OF_MEMORY;
+    }
+    
+    /* Initialize appropriate decoder */
+    block_align = (int)pInfo->block_align;
+    if (pInfo->codec_type == DRAT3_CODEC_ATRAC3) {
+        pAt3->pDecoder = atrac3_alloc((int)pInfo->channels, &block_align, pInfo->extradata, pInfo->extradata_size);
+    } else if (pInfo->codec_type == DRAT3_CODEC_ATRAC3P) {
+        pAt3->pDecoder = atrac3p_alloc((int)pInfo->channels, &block_align);
+    } else {
+        drat3__free(pAt3->pDecodeBuffer, &pAt3->allocationCallbacks);
+        drat3__free(pAt3->pFrameBuffer, &pAt3->allocationCallbacks);
+        drat3_container_close(pContainer);
+        return DRAT3_INVALID_FILE;
+    }
+    
+    if (pAt3->pDecoder == NULL) {
+        drat3__free(pAt3->pDecodeBuffer, &pAt3->allocationCallbacks);
+        drat3__free(pAt3->pFrameBuffer, &pAt3->allocationCallbacks);
+        drat3_container_close(pContainer);
+        return DRAT3_OUT_OF_MEMORY;
+    }
+    
+    return DRAT3_SUCCESS;
+}
+
+#ifndef DR_AT3_NO_STDIO
+drat3_result drat3_init_file(const char* pFilePath, const drat3_config* pConfig, drat3* pAt3) {
+    drat3_container* pContainer;
+    
+    if (pFilePath == NULL || pAt3 == NULL) {
+        return DRAT3_INVALID_ARGS;
+    }
+    
+    pContainer = drat3_container_open_file(pFilePath);
+    if (pContainer == NULL) {
+        return DRAT3_INVALID_FILE;
+    }
+    
+    return drat3__init_internal(pAt3, pContainer, pConfig);
+}
+#endif
+
+drat3_result drat3_init_memory(const void* pData, size_t dataSize, const drat3_config* pConfig, drat3* pAt3) {
+    drat3_container* pContainer;
+    
+    if (pData == NULL || dataSize == 0 || pAt3 == NULL) {
+        return DRAT3_INVALID_ARGS;
+    }
+    
+    pContainer = drat3_container_open_memory(pData, dataSize);
+    if (pContainer == NULL) {
+        return DRAT3_INVALID_FILE;
+    }
+    
+    return drat3__init_internal(pAt3, pContainer, pConfig);
+}
+
+void drat3_uninit(drat3* pAt3) {
+    if (pAt3 == NULL) {
+        return;
+    }
+    
+    if (pAt3->pDecoder) {
+        if (pAt3->codecType == DRAT3_CODEC_ATRAC3) {
+            atrac3_free((struct ATRAC3Context*)pAt3->pDecoder);
+        } else if (pAt3->codecType == DRAT3_CODEC_ATRAC3P) {
+            atrac3p_free((struct ATRAC3PContext*)pAt3->pDecoder);
+        }
+    }
+    
+    drat3__free(pAt3->pDecodeBuffer, &pAt3->allocationCallbacks);
+    drat3__free(pAt3->pFrameBuffer, &pAt3->allocationCallbacks);
+    
+    if (pAt3->pContainer) {
+        drat3_container_close(pAt3->pContainer);
+    }
+    
+    memset(pAt3, 0, sizeof(*pAt3));
+}
+
+drat3_uint64 drat3_read_pcm_frames_f32(drat3* pAt3, drat3_uint64 framesToRead, float* pBufferOut) {
+    drat3_uint64 totalFramesRead = 0;
+    
+    if (pAt3 == NULL || framesToRead == 0) {
+        return 0;
+    }
+    
+    /* First, consume any leftover frames from previous decode */
+    if (pAt3->leftoverFrames > 0) {
+        drat3_uint64 framesToConsume = pAt3->leftoverFrames;
+        if (framesToConsume > framesToRead) {
+            framesToConsume = framesToRead;
+        }
+        
+        if (pBufferOut != NULL) {
+            memcpy(pBufferOut, 
+                   pAt3->pDecodeBuffer + pAt3->leftoverOffset * pAt3->channels,
+                   (size_t)(framesToConsume * pAt3->channels * sizeof(float)));
+            pBufferOut += framesToConsume * pAt3->channels;
+        }
+        
+        pAt3->leftoverOffset += (drat3_uint32)framesToConsume;
+        pAt3->leftoverFrames -= (drat3_uint32)framesToConsume;
+        pAt3->currentPCMFrame += framesToConsume;
+        totalFramesRead += framesToConsume;
+        framesToRead -= framesToConsume;
+    }
+    
+    /* Decode more frames as needed */
+    while (framesToRead > 0) {
+        int bytesRead;
+        int nbSamples = 0;
+        float* outPtrs[2];
+        drat3_uint32 i;
+        
+        /* Read next encoded frame */
+        bytesRead = drat3_container_read_frame(pAt3->pContainer, pAt3->pFrameBuffer, pAt3->frameBufferSize);
+        if (bytesRead <= 0) {
+            break; /* End of stream or error */
+        }
+        
+        /* Decode the frame */
+        outPtrs[0] = pAt3->pDecodeBuffer;
+        outPtrs[1] = pAt3->pDecodeBuffer + pAt3->decodeBufferCapacity;
+        
+        if (pAt3->codecType == DRAT3_CODEC_ATRAC3) {
+            if (atrac3_decode_frame((struct ATRAC3Context*)pAt3->pDecoder, outPtrs, &nbSamples, pAt3->pFrameBuffer, bytesRead) < 0) {
+                break;
+            }
+        } else {
+            if (atrac3p_decode_frame((struct ATRAC3PContext*)pAt3->pDecoder, outPtrs, &nbSamples, pAt3->pFrameBuffer, bytesRead) < 0) {
+                break;
+            }
+        }
+        
+        if (nbSamples <= 0) {
+            continue;
+        }
+        
+        /* Interleave the output (decoder outputs planar) */
+        if (pAt3->channels == 2) {
+            float* dst = pAt3->pDecodeBuffer;
+            float* src0 = outPtrs[0];
+            float* src1 = outPtrs[1];
+            /* We need a temp buffer since we're interleaving in-place */
+            for (i = 0; i < (drat3_uint32)nbSamples; i++) {
+                float s0 = src0[i];
+                float s1 = src1[i];
+                dst[i * 2 + 0] = s0;
+                dst[i * 2 + 1] = s1;
+            }
+        }
+        /* For mono, data is already in place */
+        
+        /* How many frames can we deliver now? */
+        {
+            drat3_uint64 framesToDeliver = (drat3_uint32)nbSamples;
+            if (framesToDeliver > framesToRead) {
+                framesToDeliver = framesToRead;
+            }
+            
+            if (pBufferOut != NULL) {
+                memcpy(pBufferOut, pAt3->pDecodeBuffer, (size_t)(framesToDeliver * pAt3->channels * sizeof(float)));
+                pBufferOut += framesToDeliver * pAt3->channels;
+            }
+            
+            pAt3->currentPCMFrame += framesToDeliver;
+            totalFramesRead += framesToDeliver;
+            framesToRead -= framesToDeliver;
+            
+            /* Store leftovers */
+            if ((drat3_uint32)nbSamples > framesToDeliver) {
+                pAt3->leftoverFrames = (drat3_uint32)nbSamples - (drat3_uint32)framesToDeliver;
+                pAt3->leftoverOffset = (drat3_uint32)framesToDeliver;
+            } else {
+                pAt3->leftoverFrames = 0;
+                pAt3->leftoverOffset = 0;
+            }
+        }
+    }
+    
+    return totalFramesRead;
+}
+
+drat3_uint64 drat3_read_pcm_frames_s16(drat3* pAt3, drat3_uint64 framesToRead, drat3_int16* pBufferOut) {
+    drat3_uint64 totalFramesRead = 0;
+    float tempBuffer[2048];
+    drat3_uint64 tempFrames = sizeof(tempBuffer) / sizeof(float) / 2; /* Assume max 2 channels */
+    
+    if (pAt3 == NULL || framesToRead == 0) {
+        return 0;
+    }
+    
+    if (pAt3->channels > 0) {
+        tempFrames = sizeof(tempBuffer) / sizeof(float) / pAt3->channels;
+    }
+    
+    while (framesToRead > 0) {
+        drat3_uint64 framesToReadNow = framesToRead;
+        drat3_uint64 framesRead;
+        drat3_uint64 i;
+        
+        if (framesToReadNow > tempFrames) {
+            framesToReadNow = tempFrames;
+        }
+        
+        framesRead = drat3_read_pcm_frames_f32(pAt3, framesToReadNow, tempBuffer);
+        if (framesRead == 0) {
+            break;
+        }
+        
+        /* Convert to s16 */
+        if (pBufferOut != NULL) {
+            for (i = 0; i < framesRead * pAt3->channels; i++) {
+                pBufferOut[i] = drat3__f32_to_s16(tempBuffer[i]);
+            }
+            pBufferOut += framesRead * pAt3->channels;
+        }
+        
+        totalFramesRead += framesRead;
+        framesToRead -= framesRead;
+    }
+    
+    return totalFramesRead;
+}
+
+drat3_result drat3_seek_to_pcm_frame(drat3* pAt3, drat3_uint64 targetPCMFrameIndex) {
+    const drat3_container_info* pInfo;
+    drat3_uint64 targetFrameIndex;
+    drat3_uint64 targetFrameOffset;
+    
+    if (pAt3 == NULL) {
+        return DRAT3_INVALID_ARGS;
+    }
+    
+    pInfo = drat3_container_get_info(pAt3->pContainer);
+    if (pInfo == NULL) {
+        return DRAT3_ERROR;
+    }
+    
+    if (targetPCMFrameIndex >= pAt3->totalPCMFrameCount) {
+        targetPCMFrameIndex = pAt3->totalPCMFrameCount;
+    }
+    
+    /* Calculate which encoded frame contains this PCM frame */
+    targetFrameIndex = targetPCMFrameIndex / pInfo->samples_per_frame;
+    targetFrameOffset = targetPCMFrameIndex % pInfo->samples_per_frame;
+    
+    /* Seek to that encoded frame */
+    if (drat3_container_seek_frame(pAt3->pContainer, targetFrameIndex) != 0) {
+        return DRAT3_BAD_SEEK;
+    }
+    
+    /* Clear leftover buffer */
+    pAt3->leftoverFrames = 0;
+    pAt3->leftoverOffset = 0;
+    
+    /* Flush decoder */
+    if (pAt3->codecType == DRAT3_CODEC_ATRAC3) {
+        atrac3_flush_buffers((struct ATRAC3Context*)pAt3->pDecoder);
+    } else {
+        atrac3p_flush_buffers((struct ATRAC3PContext*)pAt3->pDecoder);
+    }
+    
+    pAt3->currentPCMFrame = targetFrameIndex * pInfo->samples_per_frame;
+    
+    /* Skip samples to reach exact position */
+    if (targetFrameOffset > 0) {
+        drat3_read_pcm_frames_f32(pAt3, targetFrameOffset, NULL);
+    }
+    
+    return DRAT3_SUCCESS;
+}
+
+drat3_uint64 drat3_get_cursor_in_pcm_frames(drat3* pAt3) {
+    if (pAt3 == NULL) {
+        return 0;
+    }
+    return pAt3->currentPCMFrame;
+}
+
+drat3_uint64 drat3_get_length_in_pcm_frames(drat3* pAt3) {
+    if (pAt3 == NULL) {
+        return 0;
+    }
+    return pAt3->totalPCMFrameCount;
+}
+
+/*
+ * High-Level API Implementation
+ */
+
+#ifndef DR_AT3_NO_STDIO
+float* drat3_open_file_and_read_pcm_frames_f32(const char* pFilePath, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks) {
+    drat3 at3;
+    drat3_config config;
+    float* pSampleData;
+    drat3_uint64 totalFramesRead;
+    
+    if (pChannels) *pChannels = 0;
+    if (pSampleRate) *pSampleRate = 0;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = 0;
+    
+    memset(&config, 0, sizeof(config));
+    if (pAllocationCallbacks) {
+        config.allocationCallbacks = *pAllocationCallbacks;
+    }
+    
+    if (drat3_init_file(pFilePath, &config, &at3) != DRAT3_SUCCESS) {
+        return NULL;
+    }
+    
+    pSampleData = (float*)drat3__malloc((size_t)(at3.totalPCMFrameCount * at3.channels * sizeof(float)), pAllocationCallbacks);
+    if (pSampleData == NULL) {
+        drat3_uninit(&at3);
+        return NULL;
+    }
+    
+    totalFramesRead = drat3_read_pcm_frames_f32(&at3, at3.totalPCMFrameCount, pSampleData);
+    
+    if (pChannels) *pChannels = at3.channels;
+    if (pSampleRate) *pSampleRate = at3.sampleRate;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = totalFramesRead;
+    
+    drat3_uninit(&at3);
+    
+    return pSampleData;
+}
+
+drat3_int16* drat3_open_file_and_read_pcm_frames_s16(const char* pFilePath, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks) {
+    drat3 at3;
+    drat3_config config;
+    drat3_int16* pSampleData;
+    drat3_uint64 totalFramesRead;
+    
+    if (pChannels) *pChannels = 0;
+    if (pSampleRate) *pSampleRate = 0;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = 0;
+    
+    memset(&config, 0, sizeof(config));
+    if (pAllocationCallbacks) {
+        config.allocationCallbacks = *pAllocationCallbacks;
+    }
+    
+    if (drat3_init_file(pFilePath, &config, &at3) != DRAT3_SUCCESS) {
+        return NULL;
+    }
+    
+    pSampleData = (drat3_int16*)drat3__malloc((size_t)(at3.totalPCMFrameCount * at3.channels * sizeof(drat3_int16)), pAllocationCallbacks);
+    if (pSampleData == NULL) {
+        drat3_uninit(&at3);
+        return NULL;
+    }
+    
+    totalFramesRead = drat3_read_pcm_frames_s16(&at3, at3.totalPCMFrameCount, pSampleData);
+    
+    if (pChannels) *pChannels = at3.channels;
+    if (pSampleRate) *pSampleRate = at3.sampleRate;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = totalFramesRead;
+    
+    drat3_uninit(&at3);
+    
+    return pSampleData;
+}
+#endif
+
+float* drat3_open_memory_and_read_pcm_frames_f32(const void* pData, size_t dataSize, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks) {
+    drat3 at3;
+    drat3_config config;
+    float* pSampleData;
+    drat3_uint64 totalFramesRead;
+    
+    if (pChannels) *pChannels = 0;
+    if (pSampleRate) *pSampleRate = 0;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = 0;
+    
+    memset(&config, 0, sizeof(config));
+    if (pAllocationCallbacks) {
+        config.allocationCallbacks = *pAllocationCallbacks;
+    }
+    
+    if (drat3_init_memory(pData, dataSize, &config, &at3) != DRAT3_SUCCESS) {
+        return NULL;
+    }
+    
+    pSampleData = (float*)drat3__malloc((size_t)(at3.totalPCMFrameCount * at3.channels * sizeof(float)), pAllocationCallbacks);
+    if (pSampleData == NULL) {
+        drat3_uninit(&at3);
+        return NULL;
+    }
+    
+    totalFramesRead = drat3_read_pcm_frames_f32(&at3, at3.totalPCMFrameCount, pSampleData);
+    
+    if (pChannels) *pChannels = at3.channels;
+    if (pSampleRate) *pSampleRate = at3.sampleRate;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = totalFramesRead;
+    
+    drat3_uninit(&at3);
+    
+    return pSampleData;
+}
+
+drat3_int16* drat3_open_memory_and_read_pcm_frames_s16(const void* pData, size_t dataSize, drat3_uint32* pChannels, drat3_uint32* pSampleRate, drat3_uint64* pTotalPCMFrameCount, const drat3_allocation_callbacks* pAllocationCallbacks) {
+    drat3 at3;
+    drat3_config config;
+    drat3_int16* pSampleData;
+    drat3_uint64 totalFramesRead;
+    
+    if (pChannels) *pChannels = 0;
+    if (pSampleRate) *pSampleRate = 0;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = 0;
+    
+    memset(&config, 0, sizeof(config));
+    if (pAllocationCallbacks) {
+        config.allocationCallbacks = *pAllocationCallbacks;
+    }
+    
+    if (drat3_init_memory(pData, dataSize, &config, &at3) != DRAT3_SUCCESS) {
+        return NULL;
+    }
+    
+    pSampleData = (drat3_int16*)drat3__malloc((size_t)(at3.totalPCMFrameCount * at3.channels * sizeof(drat3_int16)), pAllocationCallbacks);
+    if (pSampleData == NULL) {
+        drat3_uninit(&at3);
+        return NULL;
+    }
+    
+    totalFramesRead = drat3_read_pcm_frames_s16(&at3, at3.totalPCMFrameCount, pSampleData);
+    
+    if (pChannels) *pChannels = at3.channels;
+    if (pSampleRate) *pSampleRate = at3.sampleRate;
+    if (pTotalPCMFrameCount) *pTotalPCMFrameCount = totalFramesRead;
+    
+    drat3_uninit(&at3);
+    
+    return pSampleData;
+}
+
+void drat3_free(void* p, const drat3_allocation_callbacks* pAllocationCallbacks) {
+    drat3__free(p, pAllocationCallbacks);
 }
 
 #endif /* DR_AT3_IMPLEMENTATION */
