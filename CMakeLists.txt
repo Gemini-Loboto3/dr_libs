@@ -8,6 +8,10 @@ option(DR_LIBS_FORCE_C89   "Force compilation as C89" OFF)
 option(DR_LIBS_NO_WAV      "Disable WAV"              OFF)
 option(DR_LIBS_NO_FLAC     "Disable FLAC"             OFF)
 option(DR_LIBS_NO_MP3      "Disable MP3"              OFF)
+option(DR_LIBS_NO_OPUS     "Disable Opus"             OFF)
+option(DR_LIBS_NO_VORBIS   "Disable Vorbis"           OFF)
+option(DR_LIBS_NO_WMA      "Disable WMA"              OFF)
+option(DR_LIBS_NO_AT3      "Disable ATRAC3/3+"        OFF)
 
 # Construct compiler flags.
 set(COMPILE_OPTIONS)
@@ -175,6 +179,82 @@ if(NOT DR_LIBS_NO_MP3)
         add_executable(mp3_extract tests/mp3/mp3_extract.c)
         target_link_libraries(mp3_extract PRIVATE ${COMMON_LIBRARIES})
         add_test(NAME mp3_extract COMMAND mp3_extract ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/mp3/tests/test.mp3 -o ${CMAKE_CURRENT_BINARY_DIR}/test.mp3)
+    else()
+        # Not building tests.
+    endif()
+endif()
+
+
+# Opus
+if(NOT DR_LIBS_NO_OPUS)
+    if(DR_LIBS_BUILD_TESTS)
+        enable_testing()
+
+        add_executable(opus_basic tests/opus/opus_basic.c)
+        target_link_libraries(opus_basic PRIVATE ${COMMON_LIBRARIES})
+        add_test(NAME opus_basic COMMAND opus_basic ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/opus)
+
+        # Note: dr_opus.h has C++ compatibility issues (uses 'restrict' keyword, implicit void* casts)
+        # C++ test disabled until library is fixed
+        # add_executable(opus_basic_cpp tests/opus/opus_basic.cpp)
+        # target_link_libraries(opus_basic_cpp PRIVATE ${COMMON_LIBRARIES})
+        # add_test(NAME opus_basic_cpp COMMAND opus_basic_cpp ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/opus)
+    else()
+        # Not building tests.
+    endif()
+endif()
+
+
+# Vorbis
+if(NOT DR_LIBS_NO_VORBIS)
+    if(DR_LIBS_BUILD_TESTS)
+        enable_testing()
+
+        add_executable(vorbis_basic tests/vorbis/vorbis_basic.c)
+        target_link_libraries(vorbis_basic PRIVATE ${COMMON_LIBRARIES})
+        add_test(NAME vorbis_basic COMMAND vorbis_basic ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/vorbis)
+
+        add_executable(vorbis_basic_cpp tests/vorbis/vorbis_basic.cpp)
+        target_link_libraries(vorbis_basic_cpp PRIVATE ${COMMON_LIBRARIES})
+        add_test(NAME vorbis_basic_cpp COMMAND vorbis_basic_cpp ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/vorbis)
+    else()
+        # Not building tests.
+    endif()
+endif()
+
+
+# WMA
+if(NOT DR_LIBS_NO_WMA)
+    if(DR_LIBS_BUILD_TESTS)
+        enable_testing()
+
+        add_executable(wma_basic tests/wma/wma_basic.c)
+        target_link_libraries(wma_basic PRIVATE ${COMMON_LIBRARIES})
+        add_test(NAME wma_basic COMMAND wma_basic ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/wma)
+
+        # Note: dr_wma.h has C++ compatibility issues (goto crossing variable initialization)
+        # C++ test disabled until library is fixed
+        # add_executable(wma_basic_cpp tests/wma/wma_basic.cpp)
+        # target_link_libraries(wma_basic_cpp PRIVATE ${COMMON_LIBRARIES})
+        # add_test(NAME wma_basic_cpp COMMAND wma_basic_cpp ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/wma)
+    else()
+        # Not building tests.
+    endif()
+endif()
+
+
+# ATRAC3/ATRAC3+
+if(NOT DR_LIBS_NO_AT3)
+    if(DR_LIBS_BUILD_TESTS)
+        enable_testing()
+
+        add_executable(at3_basic tests/at3/at3_basic.c)
+        target_link_libraries(at3_basic PRIVATE ${COMMON_LIBRARIES})
+        add_test(NAME at3_basic COMMAND at3_basic ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/at3)
+
+        add_executable(at3_basic_cpp tests/at3/at3_basic.cpp)
+        target_link_libraries(at3_basic_cpp PRIVATE ${COMMON_LIBRARIES})
+        add_test(NAME at3_basic_cpp COMMAND at3_basic_cpp ${CMAKE_CURRENT_SOURCE_DIR}/tests/testvectors/at3)
     else()
         # Not building tests.
     endif()
